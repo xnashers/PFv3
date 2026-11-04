@@ -1,0 +1,8 @@
+{
+  "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
+  "hosting": {
+    "public": ".",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "tools/**", "*.md", "firestore.*"],
+    "headers": [{ "source": "**/*.@(png|mp3)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }] }]
+  }
+}

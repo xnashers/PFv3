@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Private save: only the signed-in owner. Capped to ~900 KB (Firestore doc limit is 1 MiB).
+    match /saves/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['data', 'updatedAt'])
+        && request.resource.data.data is map;
+      allow delete: if false;
+    }
+
+    // Public leaderboard profile: anyone signed in can read, only the owner can write their own.
+    match /players/{uid} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['username', 'farmName', 'level', 'xp', 'peso', 'score', 'updatedAt'])
+        && request.resource.data.username is string && request.resource.data.username.size() <= 20
+        && request.resource.data.farmName is string && request.resource.data.farmName.size() <= 24
+        && request.resource.data.level is int && request.resource.data.level >= 1 && request.resource.data.level <= 100
+        && request.resource.data.xp is int && request.resource.data.peso is int
+        && request.resource.data.score is int;
+      allow delete: if false;
+    }
+  }
+}
