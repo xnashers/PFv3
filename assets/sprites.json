@@ -1,0 +1,73 @@
+{
+  "cell": 128,
+  "cols": 8,
+  "crops": {
+    "sheet": "assets/crops.png",
+    "rows": 19,
+    "order": [
+      "kangkong",
+      "pechay",
+      "mustasa",
+      "sitaw",
+      "talong",
+      "kamatis",
+      "kalabasa",
+      "mais",
+      "palay",
+      "ampalaya",
+      "sibuyas",
+      "bawang",
+      "kamote",
+      "gabi",
+      "mangga",
+      "calamansi",
+      "dragonfruit",
+      "durian",
+      "mangosteen"
+    ],
+    "frames": {
+      "seed": 0,
+      "sprout": 1,
+      "growing": 2,
+      "ripe": 3,
+      "idle": [
+        4,
+        7
+      ]
+    }
+  },
+  "items": {
+    "sheet": "assets/items.png",
+    "rows": {
+      "coin": 0,
+      "star": 1,
+      "sprinkler1": 2,
+      "sprinkler2": 3,
+      "sprinkler3": 4,
+      "fertilizer": 5,
+      "crate": 6,
+      "soil": 7,
+      "burst": 8,
+      "icons": 9
+    },
+    "icons": [
+      "farm",
+      "shop",
+      "market",
+      "bag",
+      "quest",
+      "trophy",
+      "lab"
+    ],
+    "soil": {
+      "empty": 0,
+      "tilled": 1,
+      "wet": 2,
+      "selected": 3,
+      "sparkle": [
+        4,
+        7
+      ]
+    }
+  }
+}
