@@ -52,3 +52,70 @@ console.log('all game logic tests passed ✅ (level', g.player.level + ', plots'
   const g4 = new Game(); g4.load(legacy); assert.equal(g4.stats.harvests, 3); assert.deepEqual(g4.pets.owned, {});
   console.log('v2.1 tests passed ✅ (genetics, mastery, pets, achievements, titles, cheats, legacy saves)');
 }
+
+// ---- v2.2: token shop, quests, login streak, QoL, events, pets, season ----
+{
+  const { getEvent, EVENTS, EVENT_MS } = await import('../data/events.js');
+  const fresh = () => { const g = new Game(); g.refreshStock(); g.tick(); return g; };
+  // events rotate weekly and cover every event
+  const seen = new Set(); for (let i = 0; i < EVENTS.length; i++) seen.add(getEvent(Date.UTC(2026, 0, 5) + i * EVENT_MS + 1000).id); assert.equal(seen.size, EVENTS.length);
+
+  // token shop
+  let g = fresh(); assert.equal(g.buyMutLuck().ok, false, 'needs tokens'); g.tokens = 1000;
+  assert.ok(g.buyAutoHarvest().ok); assert.deepEqual(g.autoCategories, ['starter']);
+  assert.ok(g.buyMutLuck().ok); assert.equal(g.mutLuckPct(), 2);
+  assert.ok(g.buySlot2().ok); assert.equal(g.buySlot2().ok, false);
+  assert.ok(g.buyWeatherTicket().ok); assert.ok(g.buyTreat().ok); assert.ok(g.buyBoost().ok); assert.ok(g.boostActive);
+  assert.ok(g.buyCosmetic('plot_sakura').ok); assert.equal(g.meta.skins.plot, 'plot_sakura'); assert.equal(g.buyCosmetic('weekly_frame').ok, false);
+  const r = g.legendaryRoll(); assert.ok(r.ok);
+  // weather tickets: common costs 1, rare costs 3
+  g.weatherTickets = 1; assert.ok(g.useWeatherTicket('rain').ok); assert.equal(g.currentWeather.id, 'rain'); assert.equal(g.useWeatherTicket('divine').ok, false);
+
+  // boost raises price + xp
+  const g0 = fresh(), item = { weight: 1, mutations: [] }, base = g0.itemPrice('kangkong', item); g0.meta.boostUntil = Date.now() + 1e5;
+  assert.ok(g0.itemPrice('kangkong', item) >= base); assert.equal(g0.xpMult() >= 2, true);
+
+  // auto-harvester: only collects crops that had a mutation roll, and only its categories
+  g = fresh(); g.tokens = 500; g.buyAutoHarvest(); g.seeds = { kangkong: 5, kamatis: 5 }; g.plant(0, 'kangkong'); g.plots[0].harvestAt = Date.now() - 1; g.tick();
+  assert.equal(g.plots[0].status, 'ready', 'not auto-harvested before its first mutation roll');
+  g.changeWeather(); g.tick(); assert.equal(g.plots[0].status, 'empty', 'auto-harvested after a roll'); assert.ok(g.inventory.kangkong?.length);
+
+  // harvest all / plant all / bulk sell filters
+  g = fresh(); g.seeds = { kangkong: 3 }; assert.equal(g.plantAll('kangkong').count, 3);
+  g.plots.slice(0, 3).forEach((p) => { p.harvestAt = Date.now() - 1; }); g.tick(); assert.equal(g.readyCount, 3);
+  assert.equal(g.harvestAll().count, 3); assert.equal(g.harvestAll().ok, false);
+  g.inventory = { kangkong: [{ weight: 1, mutations: [] }, { weight: 1, mutations: [{ weatherId: 'rain', name: 'Waterlogged', emoji: '💧', priceBonus: 15 }] }] };
+  assert.ok(g.sellFilter({ mutated: false }).ok); assert.equal(g.inventory.kangkong.length, 1, 'mutated crop kept'); assert.equal(g.sellFilter({ category: 'premium' }).ok, false);
+  assert.ok(g.sellFilter({ mutated: true }).ok); assert.equal(g.inventory.kangkong, undefined);
+  assert.ok(g.stats.bestSale > 0 && g.season.earned > 0);
+
+  // quests + counters + bonus
+  g = fresh(); assert.equal(g.daily.list.length, 3); assert.equal(g.weekly.list.length, 3);
+  const dq = g.daily.list[0]; g.bump(dq.counter, dq.target); assert.ok(g.claimQuest('daily', dq.id).ok); assert.equal(g.claimQuest('daily', dq.id).ok, false, 'no double claim');
+  assert.equal(g.claimQuest('daily', g.daily.list[1].id).ok, false, 'unfinished');
+  for (const q of g.daily.list) { g.bump(q.counter, q.target); g.claimQuest('daily', q.id); } assert.ok(g.claimQuestBonus('daily').ok); assert.equal(g.claimQuestBonus('daily').ok, false);
+  for (const q of g.weekly.list) { g.bump(q.counter, q.target); g.claimQuest('weekly', q.id); } assert.ok(g.claimQuestBonus('weekly').ok); assert.ok(g.ownsCosmetic('weekly_frame'));
+  const g5 = new Game(); g5.load(JSON.parse(JSON.stringify(g.snapshot()))); assert.equal(g5.daily.key, g.daily.key); assert.ok(g5.daily.bonusClaimed, 'quest state survives a save');
+
+  // login streak: day 1, no double claim, consecutive days continue, a gap resets
+  g = fresh(); assert.equal(g.loginState.day, 1); assert.ok(g.claimLogin().ok); assert.equal(g.claimLogin().ok, false);
+  const t = g.streak.claimedDay; g.streak.claimedDay = t - 1; g.streak.lastDay = t - 1; assert.equal(g.loginState.day, 2); assert.ok(g.claimLogin().ok); assert.equal(g.streak.count, 2);
+  g.streak.claimedDay = t - 5; g.streak.lastDay = t - 5; assert.ok(g.claimLogin().ok); assert.equal(g.streak.count, 1, 'gap resets the streak');
+  g.streak.count = 7; g.streak.lastDay = g.streak.claimedDay - 1; g.streak.claimedDay = -1; assert.ok(g.claimLogin().ok); assert.equal(g.streak.count, 8);
+
+  // pets: 2 slots + synergy, treats, evolution, event-only pet
+  g = fresh(); g.player.peso = 1e9; g.player.level = 40; g.adoptPet('aso'); g.adoptPet('pusa');
+  assert.equal(g.setPetSlot2('pusa').ok, false, 'slot 2 locked'); g.tokens = 500; g.buySlot2(); assert.ok(g.setPetSlot2('pusa').ok); assert.equal(g.activePets.length, 2);
+  const single = g.petBonus('growth'); assert.ok(single > 0 && g.petBonus('price') > 0);
+  g.pets.active2 = null; const solo = g.petBonus('growth'); g.pets.active2 = 'pusa'; assert.ok(single > solo, 'synergy bonus');
+  g.buyTreat(); assert.ok(g.treatPet('aso').ok); assert.equal(g.pets.owned.aso, 2);
+  g.pets.owned.aso = 10; assert.equal(g.evolvePet('aso').ok, false, 'needs treats'); g.meta.treats = 3; assert.ok(g.evolvePet('aso').ok); assert.ok(g.pets.evolved.aso);
+  const ev = getEvent().id; assert.equal(g.adoptPet('sarimanok').ok, ev === 'parade');
+  // season rolls over and pays participants
+  g = fresh(); g.season = { id: '1999-01', earned: 500, mutations: 2 }; const tk = g.tokens; g.tick(); assert.ok(g.tokens > tk); assert.equal(g.season.earned, 0);
+  // legacy save without any v2.2 field still loads
+  const old = JSON.parse(JSON.stringify(fresh().snapshot())); for (const k of ['meta', 'daily', 'weekly', 'streak', 'season']) delete old[k];
+  const g6 = new Game(); g6.load(old); assert.equal(g6.meta.autoHarvest, 0); assert.ok(g6.daily && g6.weekly);
+  const prof = fresh().leaderboardProfile; for (const k of ['score', 'mutations', 'harvests', 'bestSale', 'seasonEarned']) assert.ok(Number.isInteger(prof[k]), k);
+  console.log('v2.2 tests passed ✅ (token shop, auto-harvest, bulk sell, quests, login streak, events, pets, seasons)');
+}

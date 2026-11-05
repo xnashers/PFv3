@@ -62,7 +62,11 @@ async function startGame({ guest = false, user = null }) {
   saver.flush(); game.changed();   // mark dirty so a brand-new account gets its first cloud save + leaderboard entry
   const view = mountGame(root, game, {
     username, canSync: !!user,
-    cloud: user && { uid, leaderboard: () => fb.fetchLeaderboard() },
+    cloud: user && {
+      uid,
+      leaderboard: (type, seasonId) => fb.fetchLeaderboard(type, seasonId),
+      chat: { subscribe: fb.subscribeChat, send: (text, level) => fb.sendChat(uid, username, text, level) },
+    },
     onSignOut: async () => { await saver.flush(); saver.stop(); if (user) await fb.signOutUser(); else showAuth(); },
   });
   current = { saver, view };

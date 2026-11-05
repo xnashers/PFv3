@@ -5,7 +5,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  doc, getDoc, writeBatch, collection, query, orderBy, limit, getDocs, serverTimestamp,
+  doc, getDoc, writeBatch, collection, query, orderBy, limit, getDocs, serverTimestamp, addDoc, onSnapshot, Timestamp,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { firebaseConfig, isConfigured } from './firebase-config.js';
 
@@ -68,8 +68,29 @@ export async function saveCloud(uid, data, profile, username) {
   await batch.commit();
 }
 
-export async function fetchLeaderboard(n = 20) {
-  const q = query(collection(db, 'players'), orderBy('score', 'desc'), limit(n));
+// Boards: level (default), season (this month's earnings), mutations, peso (richest farm), bestSale (highest single crop sale).
+const BOARD_FIELD = { level: 'score', season: 'seasonEarned', mutations: 'mutations', peso: 'peso', bestSale: 'bestSale' };
+export async function fetchLeaderboard(type = 'level', seasonId = '', n = 20) {
+  const field = BOARD_FIELD[type] || 'score';
+  const q = query(collection(db, 'players'), orderBy(field, 'desc'), limit(type === 'season' ? 60 : n));   // single-field order = no composite index needed
   const snap = await getDocs(q);
-  return snap.docs.map((d, i) => ({ uid: d.id, rank: i + 1, ...d.data() }));
+  let rows = snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
+  if (type === 'season') rows = rows.filter((r) => r.seasonId === seasonId && (r.seasonEarned || 0) > 0);   // ignore last month's stale entries
+  return rows.slice(0, n).map((r, i) => ({ ...r, rank: i + 1, value: r[field] || 0 }));
+}
+
+// ---- World chat: chat/{id} = { uid, username, text, level, createdAt, expireAt } ----
+// Messages auto-delete after CHAT_TTL_DAYS if you add a TTL policy on `expireAt` (see FIREBASE_SETUP.md).
+const CHAT_TTL_DAYS = 3;
+export function subscribeChat(cb, n = 50) {
+  const q = query(collection(db, 'chat'), orderBy('createdAt', 'desc'), limit(n));
+  return onSnapshot(q,
+    (snap) => cb(snap.docs.map((d) => { const x = d.data({ serverTimestamps: 'estimate' }); return { id: d.id, ...x, at: x.createdAt?.toMillis?.() || Date.now() }; }).reverse()),
+    (err) => cb(null, err));
+}
+export async function sendChat(uid, username, text, level) {
+  try {
+    await addDoc(collection(db, 'chat'), { uid, username, text, level, createdAt: serverTimestamp(), expireAt: Timestamp.fromMillis(Date.now() + CHAT_TTL_DAYS * 864e5) });
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.code === 'permission-denied' ? "Couldn't send. Publish the updated firestore.rules." : e.message }; }
 }

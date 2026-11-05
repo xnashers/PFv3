@@ -7,11 +7,23 @@ import { ACHIEVEMENTS, ACHIEVEMENT_CATEGORIES, TITLE_DISPLAY, rewardLabel } from
 import { PETS, PET_MAX_LEVEL, BONUS_LABEL, getPetFeedCost } from '../data/pets.js';
 import { cropSprite, itemSprite, soilSprite, icon } from './sprites.js';
 import { sfx, music } from './audio.js';
+import { LOGIN_REWARDS, DAILY_BONUS } from '../data/quests.js';
+import { AUTO_HARVEST_TIERS, MUTLUCK_MAX, MUTLUCK_PER_LEVEL, SLOT2_COST, TICKET_COST, TREAT_COST, LEGEND_COST, BOOST_COST, EVOLVE_TREATS, COSMETICS } from '../data/tokenshop.js';
+import { WEATHER_TYPES } from '../data/weather.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (n) => Math.floor(n).toLocaleString('en-US');
 const mmss = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+const EVENT_TAG = { parade: 'the Pet Parade' };
+const span = (ms) => { const m = Math.max(0, Math.floor(ms / 60000)), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60); return d ? `${d}d ${h}h` : h ? `${h}h ${m % 60}m` : `${m}m`; };
+const ago = (t) => { const s = Math.max(0, Math.floor((Date.now() - t) / 1000)); return s < 60 ? 'now' : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`; };
+const RICON = { peso: '💰', tokens: '🪙', fertilizer: '💩', sprinkler: '💦', premium_seed_pack: '🌟', weather_ticket: '🎫', cosmetic: '🏮' };
+const shortReward = (r) => `<i>${RICON[r.type] || '🎁'}${r.amount ? fmt(r.amount) : ''}</i>`;
+// light client-side chat filter (a few common English/Tagalog insults). Real moderation needs a server, see FIREBASE_SETUP.md.
+const BAD = /(f+u+c+k+|sh[i1]+t+|b[i1]tch|put[a4]+(ng)?\s?ina|tangina|gag[o0]|ulol|tarantado|bobo)/gi;
+const cleanText = (t) => t.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(BAD, (m) => '*'.repeat(m.length)).slice(0, 140);
 
 // ---------- toasts, floating text, modals ----------
 function toast(msg, kind = '') {
@@ -74,7 +86,8 @@ export function mountAuth(root, { configured, onSignIn, onSignUp, onGuest }) {
 //  GAME SCREEN
 // =====================================================================
 export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
-  const ui = { view: 'farm', tool: null, board: null, labTab: 'genetics', awardTab: 'achievements' };
+  const ui = { view: 'farm', tool: null, board: null, labTab: 'genetics', awardTab: 'daily', shopTab: 'seeds', ranksTab: 'boards', boardType: 'level', chat: null, chatErr: null, chatLast: 0 };
+  let chatUnsub = null;
   const taps = { titles: [], achievements: [] };   // hidden cheat: 5 quick taps on a sub-tab (same trick as v1)
   root.innerHTML = `<div id="hud"></div><main id="main"></main>
     <div class="dock"><div class="tray" id="tray"></div><nav class="tabs" id="tabs"></nav></div>`;
@@ -83,7 +96,7 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
   let lastPeso = game.player.peso;
   function renderHUD() {
     const p = game.player, xp = game.xpProgress;
-    $('#hud').innerHTML = `<div class="hud">
+    $('#hud').innerHTML = `<div class="hud" data-frame="${game.meta.skins.frame || ''}">
       <div class="farm" data-act="menu" style="cursor:pointer">
         <div class="lvl">${itemSprite('star', { size: 54, anim: false })}<b>${p.level}</b></div>
         <div class="info"><div class="name">${game.activePet ? game.activePet.emoji + ' ' : ''}${esc(p.farmName || 'My Farm')}</div><div class="title">${esc(game.titles.active && TITLE_DISPLAY[game.titles.active] ? TITLE_DISPLAY[game.titles.active].emoji + ' ' + TITLE_DISPLAY[game.titles.active].name : game.levelTitle)}</div>
@@ -96,7 +109,7 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
   // ---------- tabs ----------
   const TABS = [['farm', 'farm', 'Farm'], ['shop', 'shop', 'Shop'], ['market', 'market', 'Sell'], ['lab', 'lab', 'Lab'], ['pets', '🐾', 'Pets'], ['awards', 'quest', 'Awards'], ['ranks', 'trophy', 'Ranks']];
   function renderTabs() {
-    const n = game.unclaimedAchievements.length;
+    const n = game.claimableCount;
     $('#tabs').innerHTML = TABS.map(([id, ic, label]) => `<button class="tab ${ui.view === id ? 'on' : ''}" data-act="tab" data-id="${id}">${ic === '🐾' ? '<span class="emoji-ic">🐾</span>' : icon(ic, 46)}<span>${label}</span>${id === 'awards' && n ? `<i class="badge">${n > 9 ? '9+' : n}</i>` : ''}</button>`).join('');
   }
 
@@ -129,14 +142,19 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
       ${c ? `<span class="timer" data-timer="${i}">${ready ? 'Harvest!' : mmss(p.harvestAt - Date.now())}</span>` : ''}</button>`;
   }
   function farmHTML() {
-    const w = game.currentWeather;
-    return `${w ? `<div class="weather"><span class="em">${w.emoji}</span><div>${esc(w.name)}<small>${w.mutationEmoji} ${esc(w.mutation)} crops +₱${w.priceBonus}</small></div><span class="t" id="wt">${mmss(game.weatherSecondsLeft * 1000)}</span></div>` : ''}
-      <div class="plots">${game.plots.map(plotHTML).join('')}
+    const w = game.currentWeather, e = game.activeEvent, ready = game.readyCount, sel = ui.tool?.type === 'seed' ? ui.tool.id : null;
+    const auto = game.meta.autoHarvest ? AUTO_HARVEST_TIERS[game.meta.autoHarvest - 1].label : null;
+    return `<div class="event" data-act="goevents" style="cursor:pointer"><span class="em">${e.emoji}</span><div>${esc(e.name)}<small>${esc(e.tag)} event</small></div><span class="t">${span(e.endsAt - Date.now())}</span></div>
+      ${w ? `<div class="weather"><span class="em">${w.emoji}</span><div>${esc(w.name)}<small>${w.mutationEmoji} ${esc(w.mutation)} crops +₱${w.priceBonus}</small></div><span class="t" id="wt">${mmss(game.weatherSecondsLeft * 1000)}</span></div>` : ''}
+      <div class="toolbar"><button class="btn small yellow" data-act="harvestall" ${ready ? '' : 'disabled'}>🧺 Harvest all (${ready})</button>
+        <button class="btn small blue" data-act="plantall" ${sel ? '' : 'disabled'} title="Pick a seed in the tray first">🌱 Plant all${sel ? ' ' + esc(getCrop(sel).name) : ''}</button>
+        ${auto ? `<span class="pill green">🤖 Auto: ${esc(auto)}</span>` : ''}</div>
+      <div class="plots ${game.meta.skins.plot ? 'skin-' + game.meta.skins.plot : ''}">${game.plots.map(plotHTML).join('')}
         <button class="plot buy" data-act="buyplot"><div>➕ New plot<br>₱${fmt(game.plotPrice)}</div></button></div>`;
   }
 
   // ---------- shop view ----------
-  function shopHTML() {
+  function seedsShopHTML() {
     const cats = CROP_CATEGORIES.map((cat) => {
       const cards = CROPS.filter((c) => c.category === cat.id).map((c) => {
         const locked = !game.isUnlocked(c.id), stock = game.stockOf(c.id);
@@ -157,6 +175,36 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
     return `<div class="panel" style="text-align:center">Seed stock refreshes in <b id="stockt">${mmss(game.stock.expiresAt - Date.now())}</b></div>${gear}${cats}`;
   }
 
+  function shopHTML() {
+    const tabs = seg([['seeds', '🛒 Seeds & Gear'], ['tokens', '🪙 Token Shop']], ui.shopTab, 'shoptab');
+    return tabs + (ui.shopTab === 'tokens' ? tokensHTML() : seedsShopHTML());
+  }
+  function tokensHTML() {
+    const m = game.meta, ac = game.autoHarvestCost(), ml = game.mutLuckCost(), tk = game.tokens;
+    const buy = (act, cost, attrs = '') => `<button class="btn small yellow" data-act="${act}" ${attrs} ${tk < cost ? 'disabled' : ''}>🪙 ${fmt(cost)}</button>`;
+    const card = (em, name, desc, status, btn) => `<div class="card"><div class="pet-em">${em}</div><h3>${name}</h3><div class="sub">${desc}</div><div class="row"><span class="pill gold">${status}</span></div><div class="row">${btn}</div></div>`;
+    const max = '<span class="pill green">MAX</span>';
+    const cards = [
+      card('🤖', 'Auto-Harvester', m.autoHarvest ? `Collects: ${esc(AUTO_HARVEST_TIERS[m.autoHarvest - 1].label)}${ac === null ? '' : `<br>Next: ${esc(AUTO_HARVEST_TIERS[m.autoHarvest].label)}`}` : 'Collects ripe crops for you (after their mutation roll).', `Lv ${m.autoHarvest}/${AUTO_HARVEST_TIERS.length}`, ac === null ? max : buy('buyauto', ac)),
+      card('🧬', 'Mutation Luck', `+${MUTLUCK_PER_LEVEL}% mutation chance per level (now +${game.mutLuckPct()}%).`, `Lv ${m.mutLuck}/${MUTLUCK_MAX}`, ml === null ? max : buy('buyluck', ml)),
+      card('🐾', '2nd Pet Slot', 'Run two pets at once. Different jobs = +15% synergy.', m.slot2 ? 'Unlocked' : 'Locked', m.slot2 ? max : buy('buyslot2', SLOT2_COST)),
+      card('🎫', 'Weather Ticket', 'Pick the weather yourself (see Weather control below).', `Have ${game.weatherTickets}`, buy('buyticket', TICKET_COST)),
+      card('🦴', 'Pet Treat', `Free pet level-up, or ${EVOLVE_TREATS} to evolve a max pet (x1.5 bonus).`, `Have ${m.treats}`, buy('buytreat', TREAT_COST)),
+      card('🎰', 'Legendary Genetics', 'Random crop gets +1 genetics tier (75%), else 2 premium seed packs.', 'Roll', buy('legend', LEGEND_COST)),
+      card('⚡', 'Event Boost', '30 min of x2 XP and +25% sell price. Stacks time.', game.boostActive ? `On · ${mmss(m.boostUntil - Date.now())}` : 'Off', buy('buyboost', BOOST_COST)),
+    ].join('');
+    const weather = WEATHER_TYPES.map((w) => { const c = game.weatherTicketCost(w); return `<button class="btn small ${c > 1 ? 'purple' : 'blue'}" data-act="useweather" data-id="${w.id}" ${game.weatherTickets < c ? 'disabled' : ''}>${w.emoji} ${esc(w.name)} · ${c}🎫</button>`; }).join('');
+    const cos = (slot, title) => `<div class="panel"><h2>${title}</h2><div class="list">${COSMETICS.filter((c) => c.slot === slot).map((c) => {
+      const own = game.ownsCosmetic(c.id), on = m.skins[slot] === c.id;
+      const act = own ? `<button class="btn small ${on ? 'blue' : ''}" data-act="equipcos" data-id="${on ? '' : c.id}" data-slot="${slot}">${on ? '★ On' : 'Equip'}</button>` : c.cost == null ? `<span class="pill">${esc(c.note)}</span>` : buy('buycos', c.cost, `data-id="${c.id}"`);
+      return `<div class="item"><span style="font-size:34px">${c.emoji}</span><div class="grow"><h3>${esc(c.name)}</h3></div>${act}</div>`; }).join('')}</div></div>`;
+    return `<div class="panel" style="display:flex;justify-content:space-between;font-weight:700"><span>🪙 ${fmt(tk)} tokens</span><span>🎫 ${game.weatherTickets} · 🦴 ${m.treats}</span></div>
+      <div class="panel"><h2>Upgrades</h2><div class="grid2">${cards}</div></div>
+      <div class="panel"><h2>Weather control</h2><p style="margin-top:0;font-weight:600">Spend tickets to change the weather right now. Rare weather costs 3.</p><div class="chips">${weather}</div></div>
+      ${cos('plot', '🌸 Plot skins')}${cos('frame', '🖼️ UI frames')}
+      <div class="panel" style="text-align:center;font-weight:600">Earn tokens from daily quests, login streaks and achievements.</div>`;
+  }
+
   // ---------- market view ----------
   function marketHTML() {
     const ids = Object.keys(game.inventory);
@@ -169,18 +217,59 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
         <button class="btn small yellow" data-act="sell" data-id="${id}" data-mode="heaviest">Best</button><button class="btn small" data-act="sell" data-id="${id}" data-mode="all">All</button></div>`;
     }).join('');
     return `<div class="panel"><h2>Your basket</h2><div class="list">${rows}</div></div>
-      <button class="btn yellow block" data-act="sellall">Sell everything · ₱${fmt(total)}</button>`;
+      <button class="btn yellow block" data-act="sellall">Sell everything · ₱${fmt(total)}</button>
+      <div class="panel" style="margin-top:14px"><h2>Bulk sell</h2><div class="chips">
+        <button class="btn small" data-act="sellf" data-m="plain">Plain only (keep mutated)</button><button class="btn small purple" data-act="sellf" data-m="mut">Mutated only</button>
+        ${CROP_CATEGORIES.map((c) => `<button class="btn small blue" data-act="sellf" data-cat="${c.id}">${esc(c.name)}</button>`).join('')}</div></div>`;
   }
 
   // ---------- leaderboard view ----------
+  const BOARDS = [['level', '⭐ Level'], ['season', '📆 Season'], ['mutations', '🧬 Mutations'], ['peso', '💰 Richest'], ['bestSale', '💎 Best sale']];
   function ranksHTML() {
-    if (!canSync) return `<div class="panel empty-state"><p>Leaderboards need an online account.</p></div>`;
-    if (!ui.board) return `<div class="panel empty-state">Loading…</div>`;
-    if (ui.board.error) return `<div class="panel empty-state">Couldn't load the leaderboard.<br><small>${esc(ui.board.error)}</small></div>`;
+    const tabs = seg([['boards', '🏆 Boards'], ['chat', '💬 World Chat']], ui.ranksTab, 'ranktab');
+    if (!canSync) return `${tabs}<div class="panel empty-state"><p>Leaderboards and chat need an online account.</p></div>`;
+    return tabs + (ui.ranksTab === 'chat' ? chatHTML() : boardsHTML());
+  }
+  function boardsHTML() {
+    const t = ui.boardType, tabs = seg(BOARDS, t, 'boardtype');
+    const note = t === 'season' ? `<div class="panel" style="text-align:center;font-weight:600">Season ${esc(game.season.id)} · resets every month · your earnings: ₱${fmt(game.season.earned)}</div>` : '';
+    if (!ui.board) return `${tabs}<div class="panel empty-state">Loading…</div>`;
+    if (ui.board.error) return `${tabs}<div class="panel empty-state">Couldn't load the leaderboard.<br><small>${esc(ui.board.error)}</small></div>`;
+    if (!ui.board.length) return `${tabs}${note}<div class="panel empty-state">Nobody here yet. Be the first!</div>`;
     const me = cloud.uid;
-    return `<div class="panel"><h2>Top farmers</h2><div class="list">${ui.board.map((r) => `<div class="item ${r.uid === me ? 'me' : ''}">
+    const sub = (r) => ({ level: `@${esc(r.username)} · ₱${fmt(r.peso || 0)}` }[t] || `@${esc(r.username)} · Lv ${r.level}`);
+    const pill = (r) => ({ level: `Lv ${r.level}`, mutations: `🧬 ${fmt(r.value)}` }[t] || `₱${fmt(r.value)}`);
+    return `${tabs}${note}<div class="panel"><h2>${esc(BOARDS.find((b) => b[0] === t)[1])}</h2><div class="list">${ui.board.map((r) => `<div class="item ${r.uid === me ? 'me' : ''}">
       <div class="rank ${r.rank <= 3 ? 'r' + r.rank : ''}">${r.rank}</div>
-      <div class="grow"><h3>${esc(r.farmName)}</h3><div class="sub">@${esc(r.username)} · ₱${fmt(r.peso || 0)}</div></div><span class="pill gold">Lv ${r.level}</span></div>`).join('')}</div></div>`;
+      <div class="grow"><h3>${esc(r.farmName)}</h3><div class="sub">${sub(r)}</div></div><span class="pill gold">${pill(r)}</span></div>`).join('')}</div></div>`;
+  }
+  function chatListHTML() {
+    if (ui.chatErr) return `<p style="text-align:center">Chat unavailable.<br><small>${esc(ui.chatErr)}</small></p>`;
+    if (!ui.chat) return '<p style="text-align:center">Loading…</p>';
+    if (!ui.chat.length) return '<p style="text-align:center">No messages yet. Say hi! 👋</p>';
+    return ui.chat.map((m) => `<div class="msg ${m.uid === cloud.uid ? 'me' : ''}"><b>${esc(m.username)}</b> <small>Lv ${esc(m.level)} · ${ago(m.at)}</small><div>${esc(m.text)}</div></div>`).join('');
+  }
+  function chatHTML() {
+    return `<div class="panel chat"><div id="chatlist" class="chatlist">${chatListHTML()}</div>
+      <div class="chatbar"><input class="field" id="chatin" maxlength="140" placeholder="Say hi to the farmers…" autocomplete="off" autocapitalize="sentences" style="margin:0"><button class="btn small yellow" data-act="chatsend">Send</button></div></div>`;
+  }
+  function updateChatList() {
+    const el = $('#chatlist'); if (!el) return;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 70;
+    el.innerHTML = chatListHTML(); if (near) el.scrollTop = el.scrollHeight;
+  }
+  function syncChat() {   // listen to the chat only while the chat screen is open (saves Firestore reads)
+    const want = canSync && ui.view === 'ranks' && ui.ranksTab === 'chat';
+    if (want && !chatUnsub) chatUnsub = cloud.chat.subscribe((list, err) => { ui.chat = list; ui.chatErr = err ? err.message : null; updateChatList(); });
+    if (!want && chatUnsub) { chatUnsub(); chatUnsub = null; ui.chat = null; }
+  }
+  async function sendChat() {
+    const inp = $('#chatin'); if (!inp) return;
+    const raw = inp.value.trim(); if (!raw) return;
+    if (Date.now() - ui.chatLast < 3000) return toast('Slow down a little 🐢', 'err');
+    ui.chatLast = Date.now(); inp.value = '';
+    const r = await cloud.chat.send(cleanText(raw), game.player.level);
+    if (!r.ok) { toast(r.error, 'err'); inp.value = raw; }
   }
 
   // ---------- lab view (genetics + mastery) ----------
@@ -214,26 +303,63 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
 
   // ---------- pets view ----------
   function petsHTML() {
+    const ev = game.activeEvent;
     const cards = PETS.map((p) => {
-      const lvl = game.petLevel(p.id), owned = lvl > 0, active = game.pets.active === p.id, locked = !owned && game.player.level < p.unlockLevel;
-      const now = p.perLevel * Math.max(lvl, 1), nxt = p.perLevel * Math.min(lvl + 1, PET_MAX_LEVEL);
-      const fmtB = (n) => (Math.round(n * 100) / 100);
+      const lvl = game.petLevel(p.id), owned = lvl > 0, a1 = game.pets.active === p.id, a2 = game.meta.slot2 && game.pets.active2 === p.id, evolved = !!game.pets.evolved[p.id];
+      const eventLocked = !owned && p.eventOnly && ev.id !== p.eventOnly, locked = !owned && (eventLocked || game.player.level < p.unlockLevel);
+      const k = evolved ? 1.5 : 1, now = p.perLevel * Math.max(lvl, 1) * k, nxt = p.perLevel * Math.min(lvl + 1, PET_MAX_LEVEL) * k, fmtB = (n) => Math.round(n * 100) / 100;
       const bonus = `+${fmtB(now)}% ${BONUS_LABEL[p.bonus]}${owned && lvl < PET_MAX_LEVEL ? ` → +${fmtB(nxt)}%` : ''}`;
       let btns;
       if (!owned) btns = `<button class="btn small yellow" data-act="adopt" data-id="${p.id}" ${locked || game.player.peso < p.cost ? 'disabled' : ''}>Adopt ₱${fmt(p.cost)}</button>`;
-      else btns = `<button class="btn small ${active ? 'blue' : ''}" data-act="activepet" data-id="${p.id}">${active ? '★ Active' : 'Use'}</button>` +
-        (lvl < PET_MAX_LEVEL ? `<button class="btn small yellow" data-act="feed" data-id="${p.id}" ${game.player.peso < getPetFeedCost(p, lvl) ? 'disabled' : ''}>Feed ₱${fmt(getPetFeedCost(p, lvl))}</button>` : '<span class="pill green">MAX</span>');
-      return `<div class="card pet ${locked ? 'locked' : ''} ${active ? 'active' : ''}"><div class="pet-em">${p.emoji}</div><h3>${esc(p.name)}</h3>
-        <div class="sub">${locked ? `Unlocks at level ${p.unlockLevel}` : esc(p.desc)}</div>
+      else {
+        const feed = lvl < PET_MAX_LEVEL ? `<button class="btn small yellow" data-act="feed" data-id="${p.id}" ${game.player.peso < getPetFeedCost(p, lvl) ? 'disabled' : ''}>Feed ₱${fmt(getPetFeedCost(p, lvl))}</button>` : '';
+        const treat = lvl < PET_MAX_LEVEL && game.meta.treats > 0 ? `<button class="btn small purple" data-act="treat" data-id="${p.id}">🦴 Treat</button>` : '';
+        const evo = lvl >= PET_MAX_LEVEL ? (evolved ? '<span class="pill green">✨ Evolved</span>' : `<button class="btn small purple" data-act="evolve" data-id="${p.id}" ${game.meta.treats < EVOLVE_TREATS ? 'disabled' : ''}>✨ Evolve (${EVOLVE_TREATS}🦴)</button>`) : '';
+        btns = `<div class="chips"><button class="btn small ${a1 ? 'blue' : ''}" data-act="activepet" data-id="${p.id}">${a1 ? '★ Slot 1' : 'Slot 1'}</button>${game.meta.slot2 ? `<button class="btn small ${a2 ? 'blue' : ''}" data-act="slot2pet" data-id="${a2 ? '' : p.id}">${a2 ? '★ Slot 2' : 'Slot 2'}</button>` : ''}${feed}${treat}${evo}</div>`;
+      }
+      return `<div class="card pet ${locked ? 'locked' : ''} ${a1 || a2 ? 'active' : ''}"><div class="pet-em">${p.emoji}</div><h3>${evolved ? '✨ ' : ''}${esc(p.name)}</h3>
+        <div class="sub">${eventLocked ? `Only during ${esc(EVENT_TAG[p.eventOnly] || 'its event')} 🎊` : locked ? `Unlocks at level ${p.unlockLevel}` : esc(p.desc)}</div>
         <div class="row"><span class="pill gold">${owned ? `Lv ${lvl}/${PET_MAX_LEVEL}` : 'Not adopted'}</span></div><div class="sub"><b>${bonus}</b></div><div class="row">${btns}</div></div>`;
     }).join('');
-    return `<div class="panel" style="text-align:center;font-weight:600">One pet works on your farm at a time. Feed pets to level them up.</div><div class="panel"><h2>Pets</h2><div class="grid2">${cards}</div></div>`;
+    const intro = game.meta.slot2 ? 'Two pets work at once. Different jobs give +15% synergy.' : 'One pet works on your farm at a time. Unlock a 2nd slot in the Token Shop.';
+    return `<div class="panel" style="text-align:center;font-weight:600">${intro} Feed pets (₱ or 🦴 treats) to level them; max-level pets can evolve.${ev.id === 'parade' ? '<br><b>🎊 Pet Parade: all pet bonuses x2!</b>' : ''}</div><div class="panel"><h2>Pets</h2><div class="grid2">${cards}</div></div>`;
+  }
+
+  // ---------- daily view: login streak, events, daily + weekly quests ----------
+  function questRows(period) {
+    const set = game[period]; if (!set) return '';
+    return set.list.map((q) => {
+      const def = game.questDef(period, q.id), prog = game.questProgress(period, q), done = prog >= q.target, claimed = set.claimed[q.id];
+      const action = claimed ? '<span class="pill green">✓ Done</span>' : done ? `<button class="btn small yellow" data-act="claimq" data-period="${period}" data-id="${q.id}">Claim</button>` : `<span class="pill">${fmt(prog)}/${fmt(q.target)}</span>`;
+      return `<div class="item ${done && !claimed ? 'me' : ''}"><span style="font-size:34px">${def.emoji}</span><div class="grow"><h3>${esc(def.text.replace('{n}', fmt(q.target)))}</h3>
+        <div class="bar"><i style="width:${(prog / q.target) * 100}%"></i></div><div class="sub"><b>${esc(rewardLabel(def.reward))}</b></div></div>${action}</div>`;
+    }).join('');
+  }
+  function bonusRow(period, label) {
+    const set = game[period]; if (!set) return '';
+    const act = set.bonusClaimed ? '<span class="pill green">✓ Done</span>' : game.questBonusReady(period) ? `<button class="btn small yellow" data-act="claimbonus" data-period="${period}">Claim</button>` : '<span class="pill">🔒</span>';
+    return `<div class="item"><span style="font-size:34px">🎁</span><div class="grow"><h3>Finish all ${set.list.length}</h3><div class="sub"><b>${esc(label)}</b></div></div>${act}</div>`;
+  }
+  function dailyHTML() {
+    const L = game.loginState, e = game.activeEvent, now = new Date();
+    const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1), weekEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (((8 - now.getDay()) % 7) || 7));
+    const cells = LOGIN_REWARDS.map((d, i) => { const day = i + 1, done = L.claimed ? day <= L.day : day < L.day, today = day === L.day && !L.claimed;
+      return `<div class="day ${done ? 'done' : ''} ${today ? 'today' : ''} ${d.big ? 'big' : ''}"><b>Day ${day}</b><span>${d.rewards.map(shortReward).join('')}</span>${done ? '<em>✓</em>' : ''}</div>`; }).join('');
+    const boost = game.boostActive ? `<div class="panel" style="text-align:center;font-weight:700">⚡ Boost active: x2 XP · +25% sell · ${mmss(game.meta.boostUntil - Date.now())}</div>` : '';
+    return `<div class="panel"><h2>Login streak</h2><div class="streak">${cells}</div>
+        <p style="text-align:center;font-weight:600;margin:10px 0">🔥 ${L.count}-day streak · miss a day and it restarts</p>
+        <button class="btn yellow block" data-act="claimlogin" ${L.claimed ? 'disabled' : ''}>${L.claimed ? 'Come back tomorrow' : `Claim Day ${L.day} reward`}</button></div>
+      <div class="panel"><h2>Events</h2><div class="item"><span style="font-size:38px">${e.emoji}</span><div class="grow"><h3>${esc(e.name)} <small>${esc(e.tag)}</small></h3>
+        <div class="sub">${esc(e.desc)}</div><div class="sub"><b>Ends in ${span(e.endsAt - Date.now())}</b> · Next: ${e.next.emoji} ${esc(e.next.name)}</div></div></div></div>${boost}
+      <div class="panel"><h2>Daily quests</h2><div class="list">${questRows('daily')}${bonusRow('daily', rewardLabel(DAILY_BONUS))}</div><p style="text-align:center;margin:10px 0 0;font-size:14px;opacity:.75">Resets in ${span(dayEnd - now)}</p></div>
+      <div class="panel"><h2>Weekly challenges</h2><div class="list">${questRows('weekly')}${bonusRow('weekly', '🏮 Limited Bayanihan UI frame')}</div><p style="text-align:center;margin:10px 0 0;font-size:14px;opacity:.75">Resets in ${span(weekEnd - now)}</p></div>`;
   }
 
   // ---------- awards view (achievements + titles) ----------
   function awardsHTML() {
-    const tabs = seg([['achievements', '🏆 Achievements'], ['titles', '👑 Titles']], ui.awardTab, 'awardtab');
+    const tabs = seg([['daily', '📅 Daily'], ['achievements', '🏆 Awards'], ['titles', '👑 Titles']], ui.awardTab, 'awardtab');
     const head = `<div class="panel" style="display:flex;justify-content:space-between;font-weight:700"><span>🪙 ${fmt(game.tokens)} tokens</span><span>🎫 ${fmt(game.weatherTickets)} weather tickets</span></div>`;
+    if (ui.awardTab === 'daily') return `${tabs}${head}${dailyHTML()}`;
     if (ui.awardTab === 'titles') {
       const owned = game.titles.owned;
       const rows = owned.length ? owned.map((id) => { const t = TITLE_DISPLAY[id] || { name: id, emoji: '🏷️' }, on = game.titles.active === id;
@@ -261,14 +387,15 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
   let queued = false;
   function renderAll() {
     if (queued) return; queued = true;
-    requestAnimationFrame(() => { queued = false; renderHUD(); renderTabs(); renderTray(); renderMain(); });
+    requestAnimationFrame(() => { queued = false; renderHUD(); renderTabs(); renderTray(); if (!($('#chatin') && ui.view === 'ranks')) renderMain(); });   // don't wipe a half-typed chat message
   }
   game.on('change', renderAll);
 
   async function loadBoard() {
-    ui.board = null; renderMain();
-    try { ui.board = await cloud.leaderboard(); } catch (e) { ui.board = { error: e.message }; }
-    if (ui.view === 'ranks') renderMain();
+    if (!cloud) return;
+    const type = ui.boardType; ui.board = null; renderMain();
+    try { const rows = await cloud.leaderboard(type, game.season.id); if (type !== ui.boardType) return; ui.board = rows; } catch (e) { ui.board = { error: e.message }; }
+    if (ui.view === 'ranks' && ui.ranksTab === 'boards') renderMain();
   }
 
   // ---------- 1-second timers (no full re-render) ----------
@@ -291,6 +418,8 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
       .addEventListener('click', (e) => { if (e.target.closest('[data-close]')) e.currentTarget.remove(); });
   });
   game.on('achievement', (a) => { sfx('level'); toast(`🏆 ${a.name} unlocked! Claim it in Awards`, 'gold'); });
+  game.on('auto', (n) => toast(`🤖 Auto-harvested ${n} crop${n > 1 ? 's' : ''}`));
+  game.on('season', (se) => toast(`📆 Season ${se.id} ended! +10 🪙 for playing`, 'gold'));
   game.on('weather', (w) => toast(`${w.emoji} ${w.name}! ${w.mutationEmoji} ${w.mutation} crops +₱${w.priceBonus}`));
 
   const result = (r, okMsg) => { if (!r.ok) { sfx('no'); toast(r.error, 'err'); } else if (okMsg) toast(okMsg); return r; };
@@ -299,7 +428,37 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
     const el = e.target.closest('[data-act]'); if (!el) return;
     const d = el.dataset;
     switch (d.act) {
-      case 'tab': ui.view = d.id; if (d.id === 'ranks') loadBoard(); renderAll(); sfx('tap'); break;
+      case 'tab': ui.view = d.id; if (d.id === 'ranks' && ui.ranksTab === 'boards') loadBoard(); renderAll(); syncChat(); sfx('tap'); break;
+      case 'goevents': ui.view = 'awards'; ui.awardTab = 'daily'; renderAll(); sfx('tap'); break;
+      case 'shoptab': ui.shopTab = d.id; renderMain(); break;
+      case 'ranktab': ui.ranksTab = d.id; if (d.id === 'boards') loadBoard(); else renderMain(); syncChat(); break;
+      case 'boardtype': ui.boardType = d.id; loadBoard(); break;
+      case 'chatsend': sendChat(); break;
+      case 'harvestall': {
+        document.querySelectorAll('.plot.ready').forEach((pl, k) => { if (k < 12) burst(pl); });
+        const r = result(game.harvestAll()); if (r.ok) { sfx('harvest'); flyText(el, `+${r.count} crops`); toast(`🧺 Harvested ${r.count} crops`, 'gold'); } break;
+      }
+      case 'plantall': { if (ui.tool?.type !== 'seed') { toast('Pick a seed from the tray first 🌱'); break; } const r = result(game.plantAll(ui.tool.id)); if (r.ok) { sfx('plant'); toast(`🌱 Planted ${r.count}`); if (!game.seeds[ui.tool.id]) ui.tool = null; } break; }
+      case 'sellf': {
+        const f = d.cat ? { category: d.cat } : d.m === 'mut' ? { mutated: true } : { mutated: false };
+        const r = result(game.sellFilter(f)); if (r.ok) { sfx('coin'); flyText(el, `+₱${fmt(r.total)}`); toast(`Sold ${r.count} for ₱${fmt(r.total)}`, 'gold'); } break;
+      }
+      case 'buyauto': { const r = result(game.buyAutoHarvest()); if (r.ok) { sfx('level'); toast('🤖 Auto-Harvester upgraded!', 'gold'); } break; }
+      case 'buyluck': { const r = result(game.buyMutLuck()); if (r.ok) { sfx('level'); toast(`🧬 Mutation Luck ${r.level}`, 'gold'); } break; }
+      case 'buyslot2': if (result(game.buySlot2()).ok) { sfx('level'); toast('🐾 2nd pet slot unlocked!', 'gold'); } break;
+      case 'buyticket': if (result(game.buyWeatherTicket()).ok) { sfx('coin'); toast('🎫 +1 weather ticket'); } break;
+      case 'buytreat': if (result(game.buyTreat()).ok) { sfx('coin'); toast('🦴 +1 pet treat'); } break;
+      case 'buyboost': if (result(game.buyBoost()).ok) { sfx('level'); toast('⚡ Boost active for 30 minutes!', 'gold'); } break;
+      case 'legend': { const r = result(game.legendaryRoll()); if (r.ok) { sfx('level'); toast(r.kind === 'genetics' ? `🎰 ${r.crop.name} → ${GENETICS_TIERS[r.tier - 1].name}!` : '🎰 2 premium seed packs!', 'gold'); } break; }
+      case 'useweather': { const r = result(game.useWeatherTicket(d.id)); if (r.ok) { sfx('level'); toast(`${r.weather.emoji} Weather set to ${r.weather.name}`, 'gold'); } break; }
+      case 'buycos': if (result(game.buyCosmetic(d.id)).ok) { sfx('level'); toast('✨ Unlocked and equipped!', 'gold'); } break;
+      case 'equipcos': result(game.equipCosmetic(d.id || null, d.slot)); break;
+      case 'claimlogin': { const r = result(game.claimLogin()); if (r.ok) { sfx('level'); toast(`🎁 Day ${r.day}: ${r.rewards.map(rewardLabel).join(' + ')}`, 'gold'); } break; }
+      case 'claimq': { const r = result(game.claimQuest(d.period, d.id)); if (r.ok) { sfx('coin'); toast(`Reward: ${rewardLabel(r.reward)}`, 'gold'); } break; }
+      case 'claimbonus': { const r = result(game.claimQuestBonus(d.period)); if (r.ok) { sfx('level'); toast(`🎁 Bonus: ${rewardLabel(r.reward)}`, 'gold'); } break; }
+      case 'slot2pet': result(game.setPetSlot2(d.id || null)); break;
+      case 'treat': { const r = result(game.treatPet(d.id)); if (r.ok) { sfx('coin'); toast(`🦴 ${getPet(d.id).name} is level ${r.level}!`, 'gold'); } break; }
+      case 'evolve': if (result(game.evolvePet(d.id)).ok) { sfx('level'); toast(`✨ ${getPet(d.id).name} evolved!`, 'gold'); } break;
       case 'tool': {
         const same = ui.tool && ui.tool.type === d.type && ui.tool.id === d.id && ui.tool.tier === Number(d.tier);
         ui.tool = same ? null : { type: d.type, id: d.id, tier: Number(d.tier) }; sfx('tap'); renderAll(); break;
@@ -309,6 +468,7 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
         if (p.status === 'ready') {
           const r = game.harvest(i); if (!r.ok) return result(r);
           sfx('harvest'); burst(el);
+          if (r.items.some((x) => x.mutations.length >= 2)) { document.body.classList.add('rumble'); setTimeout(() => document.body.classList.remove('rumble'), 350); }
           const it = r.items[0]; flyText(el, `+${it.weight}kg${r.items.length > 1 ? ' ×2!' : ''}`);
           toast(`${r.crop.name} ${it.weight}kg ${it.mutations.map((m) => m.emoji).join('')}`);
           return;
@@ -326,8 +486,8 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
       case 'buyseed': { const r = result(game.buySeed(d.id, Number(d.n))); if (r.ok) sfx('coin'); break; }
       case 'buyfert': if (result(game.buyFertilizer(Number(d.n))).ok) sfx('coin'); break;
       case 'buyspr': if (result(game.buySprinkler(Number(d.tier))).ok) sfx('coin'); break;
-      case 'sell': { const r = result(game.sell(d.id, d.mode)); if (r.ok) { sfx('coin'); toast(`Sold ${r.count} for ₱${fmt(r.total)}`, 'gold'); } break; }
-      case 'sellall': { const r = result(game.sellEverything()); if (r.ok) { sfx('coin'); toast(`Sold ${r.count} items for ₱${fmt(r.total)}!`, 'gold'); } break; }
+      case 'sell': { const r = result(game.sell(d.id, d.mode)); if (r.ok) { sfx('coin'); flyText(el, `+₱${fmt(r.total)}`); toast(`Sold ${r.count} for ₱${fmt(r.total)}`, 'gold'); } break; }
+      case 'sellall': { const r = result(game.sellEverything()); if (r.ok) { sfx('coin'); flyText(el, `+₱${fmt(r.total)}`); toast(`Sold ${r.count} items for ₱${fmt(r.total)}!`, 'gold'); } break; }
       case 'labtab': ui.labTab = d.id; renderMain(); break;
       case 'gen': { const r = result(game.upgradeGenetics(d.id)); if (r.ok) { sfx('coin'); toast(`🧬 ${getCrop(d.id).name} → ${GENETICS_TIERS[r.tier - 1].name}!`, 'gold'); } break; }
       case 'mast': { const r = result(game.upgradeMastery(d.id)); if (r.ok) { sfx('coin'); toast(`🎓 ${getCrop(d.id).name} mastery ${r.level}`, 'gold'); } break; }
@@ -337,7 +497,8 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
       case 'awardtab': {
         ui.awardTab = d.id; renderMain();
         // hidden cheats from v1: 5 taps within 2 s on "Titles" -> hesoyam, on "Achievements" -> growall
-        const key = d.id, now = Date.now(); taps[key] = [...taps[key].filter((t) => now - t < 2000), now];
+        const key = d.id, now = Date.now(); if (!taps[key]) break;
+        taps[key] = [...taps[key].filter((t) => now - t < 2000), now];
         if (taps[key].length >= 5) { taps[key] = []; runCheat(key === 'titles' ? 'hesoyam' : 'growall'); }
         break;
       }
@@ -347,6 +508,8 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
       case 'menu': openMenu(); break;
     }
   });
+
+  root.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'chatin') sendChat(); });
 
   function runCheat(code) {
     const r = game.applyCheatCode(code);
@@ -376,5 +539,6 @@ export function mountGame(root, game, { username, canSync, cloud, onSignOut }) {
   }
 
   renderAll();
-  return { destroy() { clearInterval(timerLoop); } };
+  if (game.player.farmName && !game.loginState.claimed) setTimeout(() => toast('🎁 Daily login reward ready in Awards → Daily', 'gold'), 600);
+  return { destroy() { clearInterval(timerLoop); chatUnsub?.(); chatUnsub = null; } };
 }

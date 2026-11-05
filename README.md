@@ -37,6 +37,15 @@ and secret combos, planting restrictions (snow/thunderstorm), selling, XP/levels
 Genetics + mastery (`Lab` tab, `data/genetics.js`), achievements + titles (`Awards` tab, `data/achievements.js`), cheats (menu box, or 5 quick taps on the Titles / Achievements sub-tab),
 pets (`Pets` tab, `data/pets.js` - new, the old version had none). Login/Firebase is unchanged. Save format is backward compatible (SAVE_EPOCH not bumped).
 
-## Left out for now (data still in your old project)
-Research lab, mutation lab, weather center, daily objectives, login rewards, token shop (tokens are earned and shown, nothing to spend them on yet), tutorial.
-"# PFv2" 
+## Added in v2.2 (retention update)
+- **Token Shop** (Shop → 🪙 Token Shop, `data/tokenshop.js`): Auto-Harvester (3 tiers), Mutation Luck (10 levels), 2nd pet slot, weather tickets + weather control, Pet Treats, Legendary Genetics roll, 30-min Event Boost, plot skins and UI frames.
+- **Daily / weekly quests + 7-day login streak** (Awards → 📅 Daily, `data/quests.js`). Quests are picked per day/week from a seeded pool (same for everyone), targets scale with level. Finishing all weekly quests unlocks a limited UI frame. Resets at the player's local midnight / Monday.
+- **Weekly events** (`data/events.js`): Bagyong Habagat (typhoon), Pista ng Ani (harvest festival), Mutation Madness, Parada ng mga Alaga (pet parade + exclusive Sarimanok). Derived from the calendar, so no server is needed. Edit `EVENTS` to add more; the cycle is one event per week.
+- **QoL**: Harvest all, Plant all (pick a seed first), bulk sell filters (plain only / mutated only / by category), Auto-Harvester (only collects crops that have had a mutation roll, so mutations are not lost).
+- **Pets**: 2 slots with +15% synergy for different jobs, Pet Treats, evolution at max level (x1.5), Pet Parade doubles bonuses.
+- **Leaderboards**: Level, monthly Season, Mutations, Richest, Best single sale.
+- **🌍 World Chat** (Ranks → World Chat): live Firestore chat, 140 chars, 3 s cooldown, small word filter. **Re-publish `firestore.rules`** and read the v2.2 section of FIREBASE_SETUP.md.
+- Save format is backward compatible (SAVE_EPOCH not bumped); old saves load with defaults.
+
+## Not built yet
+Crop hybrids, pet battles, trading/gifting, animated pets on the farm, day/night cycle, Filipino folklore mutations (the new event names are Tagalog; crops/weather names are unchanged). Research lab, mutation lab, weather center and tutorial from v1 are still left out.

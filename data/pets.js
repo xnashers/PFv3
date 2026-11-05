@@ -6,6 +6,7 @@ export const PETS = [
   { id: 'manok', name: 'Manok', emoji: '🐔', desc: 'Scratches up extra growth', bonus: 'weight', perLevel: 1, cost: 10000, unlockLevel: 6 },
   { id: 'kalabaw', name: 'Kalabaw', emoji: '🐃', desc: 'Strong carabao, hard worker', bonus: 'xp', perLevel: 2.5, cost: 50000, unlockLevel: 10 },
   { id: 'loro', name: 'Loro', emoji: '🦜', desc: 'Spots the weather early', bonus: 'mutation', perLevel: 0.75, cost: 250000, unlockLevel: 15 },
+  { id: 'sarimanok', name: 'Sarimanok', emoji: '🦚', desc: 'Mythic bird (Pet Parade only)', bonus: 'price', perLevel: 2.5, cost: 150000, unlockLevel: 1, eventOnly: 'parade' },
   { id: 'dragon', name: 'Dragon', emoji: '🐉', desc: 'Legendary guardian', bonus: 'price', perLevel: 3, cost: 5000000, unlockLevel: 30 },
 ];
 export const PET_MAX_LEVEL = 10;

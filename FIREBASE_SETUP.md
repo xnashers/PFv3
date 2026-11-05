@@ -80,3 +80,11 @@ Then add the domain in **Authentication → Settings → Authorized domains**, o
 **Quick way:** in `src/game.js` raise `SAVE_EPOCH` (e.g. `1` → `2`) and redeploy. Every player's old save (local and cloud) is ignored on next login and they start a new farm; their cloud save is overwritten on their first sync.
 **Tidy the database too:** Firestore → Data → `players` → ⋮ → *Delete collection* (clears old leaderboard entries of players who never return), and the same for `saves`.
 **Remove accounts as well (optional):** Authentication → Users → select all → Delete. Players would then have to sign up again.
+
+## v2.2: World Chat + new leaderboards (re-publish rules!)
+1. **Publish the new `firestore.rules`** (Firestore → Rules). They add the `chat` collection and extra leaderboard fields. Without this, chat shows "Couldn't send" and the new boards stay empty.
+2. **Auto-delete old chat (recommended):** Firestore → **TTL** → *Create policy* → collection group `chat`, field `expireAt`. Messages then vanish ~3 days after posting, which keeps storage and reads small.
+3. Leaderboard boards (Level, Season, Mutations, Richest, Best sale) each sort on one field, so Firestore creates the indexes automatically. No composite index needed.
+4. **Cost note:** chat uses a live listener only while a player has *Ranks → World Chat* open. Each new message is 1 read per viewer; 50 messages load on open. Fine for the free tier at small scale; watch the 50k reads/day limit if chat gets busy.
+5. **Moderation limits:** the client masks a few bad words and limits sending to 1 message / 3 s, but a determined user can bypass client code. For real moderation use App Check + a Cloud Function (rate limit, filter) and delete abusive messages from the Firestore console.
+6. **Seasons** are calendar months. At rollover each player's season stats reset and they get 10 tokens for taking part. Rank-based prizes (top 10 etc.) need a server/Cloud Function because the game is client-authoritative.

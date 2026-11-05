@@ -59,4 +59,5 @@ export const TITLE_DISPLAY = {
 export const rewardLabel = (r) => ({
   peso: `₱${r.amount.toLocaleString('en-US')}`, tokens: `🪙 ${r.amount} tokens`, fertilizer: `💩 ${r.amount} fertilizer`,
   sprinkler: `💦 ${r.amount}× Tier ${r.tier} sprinkler`, premium_seed_pack: `🌟 ${r.amount} premium seed pack${r.amount > 1 ? 's' : ''}`, weather_ticket: `🎫 ${r.amount} weather tickets`,
+  cosmetic: '🏮 Limited cosmetic frame',
 }[r.type] || r.type);

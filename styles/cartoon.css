@@ -224,3 +224,35 @@ button { font-family: inherit; }
 .card.pet .pet-em { font-size: 64px; line-height: 72px; }
 .card.pet.active { background: linear-gradient(#e2ffc4, #b9f08a); }
 @media (max-width: 400px) { .tab { font-size: 10px; } .tab .spr { --s: 30px; } .tab .emoji-ic { font-size: 24px; line-height: 30px; } }
+
+/* ---------- v2.2: events, toolbar, chips, quests, login streak, chat, skins ---------- */
+.event {
+  display: flex; align-items: center; gap: 10px; padding: 8px 14px; margin-bottom: 10px; border: var(--ow) solid var(--ol); border-radius: 18px; font-weight: 600;
+  background: linear-gradient(#fff0c8, #ffc46a); box-shadow: 0 4px 0 var(--ol), inset 0 3px 0 #fff;
+}
+.event .em { font-size: 28px; } .event small { display: block; font-size: 12px; font-weight: 500; opacity: .75; } .event .t { margin-left: auto; font-weight: 700; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips .btn.small { min-height: 32px; padding: 3px 10px; font-size: 14px; }
+.card .chips { justify-content: center; }
+.streak { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.streak .day { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; border: 3px solid var(--ol); border-radius: 12px; background: #fff; font-size: 11px; text-align: center; }
+.streak .day b { font-size: 11px; } .streak .day span { display: flex; flex-direction: column; font-size: 13px; font-weight: 700; } .streak .day i { font-style: normal; }
+.streak .day.today { background: linear-gradient(var(--yellow-1), var(--yellow-2)); animation: glow 1s ease-in-out infinite alternate; }
+.streak .day.big { background: #f2e4ff; } .streak .day.big.today { background: linear-gradient(var(--purple-1), var(--purple-2)); }
+.streak .day.done { background: #d8f7c6; opacity: .8; } .streak .day em { position: absolute; top: -8px; right: -6px; font-style: normal; background: var(--green-2); color: #fff; border: 2px solid var(--ol); border-radius: 99px; width: 18px; height: 18px; line-height: 14px; font-size: 12px; }
+.chat { padding: 10px; }
+.chatlist { height: min(50vh, 420px); overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px; user-select: text; }
+.chatlist .msg { max-width: 88%; padding: 6px 10px; border: 3px solid var(--ol); border-radius: 14px; background: #fff; font-size: 15px; word-break: break-word; }
+.chatlist .msg.me { align-self: flex-end; background: #dff6ff; }
+.chatlist .msg small { opacity: .6; font-size: 11px; }
+.chatbar { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+body.rumble #main { animation: shake .3s; }
+/* plot skins (token shop): tint the soil tiles */
+.plots.skin-plot_sakura .plot .soil { filter: hue-rotate(300deg) saturate(1.4) brightness(1.1); }
+.plots.skin-plot_ginto .plot .soil { filter: sepia(1) saturate(3.2) hue-rotate(-12deg) brightness(1.15); }
+.plots.skin-plot_dagat .plot .soil { filter: hue-rotate(170deg) saturate(1.3); }
+/* UI frames (token shop + weekly bonus) */
+.hud[data-frame="frame_mais"] .farm, .hud[data-frame="frame_mais"] .coins { border-color: #b97a00; background: linear-gradient(#fff9c4, #ffe27a); }
+.hud[data-frame="frame_royal"] .farm, .hud[data-frame="frame_royal"] .coins { border-color: #4b2a8a; background: linear-gradient(#f1e6ff, #c9a0ff); box-shadow: 0 5px 0 #4b2a8a, 0 0 14px #c9a0ff, inset 0 3px 0 #fff; }
+.hud[data-frame="weekly_frame"] .farm, .hud[data-frame="weekly_frame"] .coins { border-color: #a31c1c; background: linear-gradient(#ffe3d6, #ff9c7a); box-shadow: 0 5px 0 #a31c1c, 0 0 14px #ffb04a, inset 0 3px 0 #fff; }
